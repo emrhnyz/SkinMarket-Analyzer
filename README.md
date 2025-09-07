@@ -35,4 +35,5 @@ Counter-Strike 2 (CS2) item’larının **Steam Market fiyatlarını** hızlıca
 git clone https://github.com/emrhnyz/Skin-Market-Analyzer.git
 cd Skin-Market-Analyzer
 pip install -r requirements.txt
-python ui_cs2_profiler.py
+python skinmarketanalyzer.py
+
