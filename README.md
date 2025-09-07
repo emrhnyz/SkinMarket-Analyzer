@@ -1,27 +1,38 @@
-# SkinMarket Analyzer
+# 🎯 SkinMarket Analyzer
 
-PySide6 tabanlı CS2 skin fiyat izleyici. Steam Market'ten **pazar fiyatı** toplar, site fiyatınla
-karşılaştırır; **kâr miktarı** ve **kâr oranını** hesaplar. Satıra çift tıklayınca öğenin
-**Pricempire** sayfasını açar. İstek hızı ve worker sayısı ayarlanabilir, çekmeyi **Durdur** butonuyla kesebilirsin.
+Counter-Strike 2 (CS2) item’larının **Steam Market fiyatlarını** hızlıca takip edebileceğiniz bir masaüstü uygulaması.  
+✔ JSON’dan item listesi yükle  
+✔ Steam fiyatlarını otomatik çek  
+✔ Kar miktarı ve oranını hesapla  
+✔ Tabloda sıralama, filtreleme, çift tıkla fiyat sayfasına gitme  
+✔ Hız/worker ayarları ve durdurma butonu  
 
-## Özellikler
-- Steam `priceoverview` + **histogram fallback** (0 dönenlerde bile fiyat bulmaya çalışır)
-- **Worker** ve **RPS** (istek/sn) ayarı
-- **Durdur** butonu
-- Tüm sayısal sütunlarda **doğru sıralama**
-- Çift tık → **Pricempire** linki (StatTrak + wear slug’ları otomatik)
-- JSON içe/dışa aktarma
+---
 
-## Ekran Görüntüsü
-<!-- assets/ screenshot koyarsan burada göster -->
-<!-- ![SkinMarket Analyzer](assets/screenshot.png) -->
+## 📸 Ekran Görüntüsü
 
-## İndir
-- En güncel Windows sürümü için: **[Releases](../../releases/latest)** bölümünden `SkinMarketAnalyzer.exe` indirin.
+![SkinMarket Analyzer Screenshot](assets/screenshot.png)
 
-## Kurulum (geliştiriciler için)
+---
+
+## 📥 İndir
+
+👉 [**Son Sürümü İndir (.exe)**](https://github.com/emrhnyz/Skin-Market-Analyzer/releases/latest)
+
+> `.exe` dosyası her yeni **Release** ile otomatik olarak güncellenir.  
+> Sadece indirip çalıştırmanız yeterli!
+
+---
+
+## 🔧 Kurulum
+
+### 1) Önceden derlenmiş `.exe` kullan (kolay yöntem)
+- Yukarıdaki **İndir** butonuna tıkla.
+- Dosyayı indirip çalıştır.
+
+### 2) Kaynaktan çalıştır (geliştiriciler için)
 ```bash
-python -m venv .venv
-. .venv/Scripts/activate   # Windows
+git clone https://github.com/emrhnyz/Skin-Market-Analyzer.git
+cd Skin-Market-Analyzer
 pip install -r requirements.txt
-python app/ui_cs2_profiler.py
+python ui_cs2_profiler.py
