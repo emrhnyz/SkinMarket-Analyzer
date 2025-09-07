@@ -20,7 +20,7 @@ Counter-Strike 2 (CS2) item’larının **Steam Market fiyatlarını** hızlıca
 
 ## 📥 İndir
 
-👉 [**Son Sürümü İndir (.exe)**]([https://github.com/emrhnyz/Skin-Market-Analyzer/releases/latest](https://github.com/emrhnyz/Skin-Market-Analyzer/releases/download/v0.1/SkinMarket-Analyzer.exe))
+👉 [**Son Sürümü İndir (.exe)**](https://github.com/emrhnyz/Skin-Market-Analyzer/releases/download/v0.1/SkinMarket-Analyzer.exe))
 
 > `.exe` dosyası her yeni **Release** ile otomatik olarak güncellenir.  
 > Sadece indirip çalıştırmanız yeterli!
@@ -39,6 +39,7 @@ git clone https://github.com/emrhnyz/Skin-Market-Analyzer.git
 cd Skin-Market-Analyzer
 pip install -r requirements.txt
 python skinmarketanalyzer.py
+
 
 
 
