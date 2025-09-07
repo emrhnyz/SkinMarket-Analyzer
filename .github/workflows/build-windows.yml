@@ -1,0 +1,50 @@
+name: build-windows
+
+on:
+  push:
+    tags:
+      - "v*"          # v1.0.0 gibi tag’lerde çalışır
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build with PyInstaller
+        run: |
+          pyinstaller app/ui_cs2_profiler.py --noconfirm --onefile --windowed --name SkinMarketAnalyzer
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SkinMarketAnalyzer-win
+          path: dist/SkinMarketAnalyzer.exe
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: SkinMarketAnalyzer-win
+          path: ./dist
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ./dist/SkinMarketAnalyzer.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
