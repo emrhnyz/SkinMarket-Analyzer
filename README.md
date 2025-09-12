@@ -39,6 +39,21 @@ git clone https://github.com/emrhnyz/Skin-Market-Analyzer.git
 cd Skin-Market-Analyzer
 pip install -r requirements.txt
 python skinmarketanalyzer.py
+```
+
+## Uyarı
+Bu proje yalnızca **eğitim ve kişisel kullanım** amaçlıdır.  
+**Ticari amacı yoktur** ve hiçbir platformun kullanım koşullarını ihlal etmeyi hedeflemez.  
+Sorumluluk tamamen kullanıcıya aittir.
+
+## Disclaimer
+This project is for **educational and personal use only**.  
+It is **non-commercial** and not intended to violate any platform’s Terms of Service.  
+Use responsibly and at your own risk.
+
+
+
+
 
 
 
