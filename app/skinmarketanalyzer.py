@@ -1,24 +1,21 @@
-# ui_cs2_profiler.py
-# PySide6 arayüzü – yalnızca Steam'den fiyat çeker (priceoverview + fallback histogram)
-# Özellikler:
-#  - Worker sayısı ve istek hızı (req/sn) ayarlanabilir
-#  - "Durdur" butonu ile çekimi kes
-#  - Sipariş fiyatı (highest buy) KALDIRILDI (kolon da gizli)
-#  - Satıra çift tıklayınca Pricempire sayfasını açar
-#  - Tüm sayısal sütunlar doğru sıralanır (NumericItem)
-# pip install PySide6 requests
+# skinmarketanalyzer.py
+
 from typing import Callable, Optional
 import re, sys, json, time, random, threading, webbrowser
 import requests
 from html import unescape
 from urllib.parse import quote_plus, unquote
+import urllib
+import urllib.parse
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+import webbrowser
+
 from PySide6.QtCore import (
-    Qt, QSize, QUrl, QObject, Signal, Slot, QBuffer, QByteArray, QThread
+    Qt, QPoint, QSize, QUrl, QObject, Signal, Slot, QBuffer, QByteArray, QThread
 )
 from PySide6.QtGui import (
     QPalette, QColor, QIcon, QAction, QPixmap, QImageReader
@@ -27,7 +24,7 @@ from PySide6.QtWidgets import (
     QApplication, QWidget, QHBoxLayout, QVBoxLayout, QSplitter, QTextEdit,
     QPushButton, QTableWidget, QTableWidgetItem, QLabel, QFileDialog,
     QHeaderView, QToolBar, QMessageBox, QLineEdit, QFrame, QAbstractItemView,
-    QSpinBox, QDoubleSpinBox, QFormLayout
+    QSpinBox, QDoubleSpinBox, QFormLayout , QMenu
 )
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
 
@@ -82,10 +79,16 @@ WEAR_MAP = {
 WEARS = list(WEAR_MAP.keys())
 
 def slugify(s: str) -> str:
-    s = s.lower().replace("™", "")
-    s = re.sub(r"[^\w\s\-]", " ", s, flags=re.UNICODE)
+    s = s.lower()
+    s = s.replace("™", "")
+    # apostrofları tamamen kaldır (Chantico's -> chanticos)
+    s = s.replace("'", "").replace("\u2019", "")  # \u2019 = ’
+    # harf/rakam/boşluk/tire dışındakileri boşluğa çevir
+    s = re.sub(r"[^a-z0-9\s-]", " ", s)
+    # boşlukları tek tireye çevir
     s = re.sub(r"\s+", "-", s.strip())
-    s = re.sub(r"-+", "-", s)
+    # birden fazla tireyi teke indir
+    s = re.sub(r"-{2,}", "-", s)
     return s
 
 def parse_item_name(name: str) -> dict:
@@ -101,6 +104,58 @@ def parse_item_name(name: str) -> dict:
     skin = parts[1] if len(parts) > 1 else ""
     return {"weapon": weapon, "skin": skin, "wear": wear, "stat": stat}
 
+
+# ---- Agent helpers (added) ----
+AGENT_TEAM_TOKENS = {
+    "sabre","elite crew","the professionals","phoenix","gendarmerie nationale",
+    "fbi swat","s.w.a.t","swat","fbi hrt","gsg-9","gendarmerie","usaf tacp","sneaky beaky",
+    "sasco","sas","nzsas","seal","navi seals","nswc seal","jungle rebel","ground rebel",
+    "guerrilla warfare","pirate","professor","dragomir","rezan","mccoy","judge","ground",
+    "professionals","elite","crew","tacp","gendarmerie nationale"
+}
+
+def _canon(s: str) -> str:
+    return slugify(s)
+
+def is_probably_agent(weapon: str, skin: str) -> bool:
+    # Heuristic: if left side is NOT a known weapon and right side looks like a team/faction -> agent
+    w = _canon(weapon)
+    known = {
+        "ak-47","m4a1-s","m4a4","awp","desert-eagle","glock-18","usp-s","p250",
+        "five-seven","cz75-auto","tec-9","p2000","dual-berettas","r8-revolver",
+        "famas","galil-ar","sg-553","aug","ssg-08","scar-20","g3sg1",
+        "mac-10","mp9","mp7","mp5-sd","p90","ump-45","pp-bizon","bizon",
+        "nova","xm1014","mag-7","sawed-off","m249","negev",
+        "karambit","bayonet","m9-bayonet","butterfly-knife","talon-knife","skeleton-knife",
+        "stiletto-knife","falchion-knife","shadow-daggers","gut-knife","bowie-knife",
+        "huntsman-knife","paracord-knife","survival-knife","ursus-knife","navaja-knife",
+        "nomad-knife","classic-knife","kukri-knife","daggers","karambit-knife","flip-knife"
+    }
+    if w in known:
+        return False
+    # If weapon side contains obvious agent indicators or skin side looks like a faction/team, treat as agent
+    right = skin.lower()
+    if any(tok in right for tok in AGENT_TEAM_TOKENS):
+        return True
+    # If weapon contains quotes or human names, also likely agent
+    if any(ch in weapon for ch in ["'", "’"]):
+        return True
+    # As a fallback: weapon has 2+ words and none of them are weapon names → likely agent
+    return True if (len(weapon.split()) >= 2 and w not in known) else False
+
+def build_agent_slug(name: str) -> str:
+    # "Xxx | Team Yyy" -> "xxx-team-yyy" (Pricempire usually uses single '-' joiner; some items have '--' but single works for most)
+    parts = [p.strip() for p in name.split("|", 1)]
+    left = parts[0] if parts else name
+    right = parts[1] if len(parts) > 1 else ""
+    left_slug = slugify(left)
+    right_slug = slugify(right)
+    if right_slug:
+        return f"{left_slug}-{right_slug}"
+    return left_slug
+# ---- End Agent helpers ----
+
+
 def build_pricempire_url(name: str, quality: str = "", stattrak_hint: Optional[bool] = None) -> Optional[str]:
     info = parse_item_name(name)
     weapon, skin, wear, stat = info["weapon"], info["skin"], info["wear"], info["stat"]
@@ -108,6 +163,11 @@ def build_pricempire_url(name: str, quality: str = "", stattrak_hint: Optional[b
         wear = quality
     if stattrak_hint is True:
         stat = True
+    # Detect agents first
+    if is_probably_agent(weapon, skin):
+        agent_slug = build_agent_slug(name)
+        return f"https://pricempire.com/cs2-items/agent/{agent_slug}"
+
     cat = "glove" if ("glove" in weapon.lower() or "gloves" in weapon.lower()) else "skin"
     item_slug = slugify(f"{weapon} {skin}").replace("--", "-")
     wear_slug = WEAR_MAP.get(wear or "", None)
@@ -117,6 +177,94 @@ def build_pricempire_url(name: str, quality: str = "", stattrak_hint: Optional[b
     return f"https://pricempire.com/cs2-items/{cat}/{item_slug}/{wear_part}"
 
 
+
+# ---- Pricempire link canonicalizer (added) ----
+PE_ALLOWED_CATS = {"skin", "glove", "agent", "sticker",
+    "tournament-sticker", "tournament-team-sticker-capsule",
+    "container", "music-kit-box", "autograph-sticker"}
+WEAR_SLUGS_CAN = {"factory-new","minimal-wear","field-tested","well-worn","battle-scarred"}
+FINISH_TYPES = {"holo","foil","gold"}
+
+_http_re = re.compile(r"(https?://pricempire\.com[^\s]+)", re.IGNORECASE)
+
+def _extract_first_pricempire_url(s: str) -> str | None:
+    if not s:
+        return None
+    m = _http_re.findall(s.replace("...tps://", " https://"))
+    return m[-1] if m else None
+
+def _clean_path(path: str) -> str:
+    path = path.split("?")[0].split("#")[0].strip()
+    path = re.sub(r"/{2,}", "/", path)
+    return path.rstrip("/").strip()
+
+def _canon_path(parts: list[str]) -> list[str]:
+    out = []
+    for p in parts:
+        p = p.strip().lower()
+        p = re.sub(r"-{2,}", "-", p)
+        if p:
+            out.append(p)
+    return out
+
+def _fix_wear_segment_canon(wear_seg: str) -> str | None:
+    if not wear_seg:
+        return None
+    seg = wear_seg
+    has_souv = seg.startswith("souvenir-")
+    has_stat = seg.startswith("stattrak-")
+    core = seg.split("-", 1)[1] if (has_souv or has_stat) else seg
+    if core not in WEAR_SLUGS_CAN:
+        return None
+    if has_souv:
+        return f"souvenir-{core}"
+    if has_stat:
+        return f"stattrak-{core}"
+    return core
+
+def pricempire_canonicalize(url_or_text: str) -> str | None:
+    raw = _extract_first_pricempire_url(url_or_text)
+    if not raw:
+        return None
+    try:
+        pu = urllib.parse.urlsplit(raw)
+    except Exception:
+        return None
+    if pu.netloc.lower() != "pricempire.com":
+        return None
+
+    path = _clean_path(pu.path)
+    parts = _canon_path(path.split("/"))
+    if len(parts) < 3 or parts[0] != "cs2-items" or parts[1] not in PE_ALLOWED_CATS:
+        return None
+
+    cat = parts[1]
+    rest = parts[2:]
+    if not rest:
+        return None
+    item_slug = rest[0]
+    tail = rest[1] if len(rest) >= 2 else None
+
+    new_parts = ["cs2-items", cat, item_slug]
+
+    if cat in {"skin", "glove"}:
+        wear = _fix_wear_segment_canon(tail or "")
+        if wear:
+            new_parts.append(wear)
+    elif cat in {"sticker", "tournament-sticker"}:
+        if tail in FINISH_TYPES:
+            new_parts.append(tail)
+    elif cat == "autograph-sticker":
+        if tail == "gold":
+            new_parts.append("gold")
+    elif cat == "music-kit-box":
+        if tail == "stattrak":
+            new_parts.append("stattrak")
+    # agent/container/capsule -> only slug
+
+    canon_path = "/" + "/".join(new_parts)
+    return urllib.parse.urlunsplit(("https", "pricempire.com", canon_path, "", ""))
+# ---- End canonicalizer ----
 def dark_palette():
     pal = QPalette()
     pal.setColor(QPalette.Window, QColor(30, 32, 34))
@@ -642,6 +790,10 @@ class MainWindow(QWidget):
         # Çift tık → Pricempire
         self.table.itemDoubleClicked.connect(self._on_table_double_clicked)
 
+        # Sağ tık menüsü
+        self.table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self._on_table_context_menu)
+
         splitter = QSplitter(Qt.Horizontal)
         splitter.addWidget(left_widget)
         splitter.addWidget(self.table_frame)
@@ -662,25 +814,75 @@ class MainWindow(QWidget):
 
     def _on_table_double_clicked(self, item: QTableWidgetItem):
         row = item.row()
-        name = (self.table.item(row, 1).text() if self.table.item(row, 1) else "")
-        quality = (self.table.item(row, 2).text() if self.table.item(row, 2) else "")
+        if row < 0:
+            return
+        self._open_pricempire_for_row(row)
 
-        # stattrak ipucunu JSON’dan da yakala
+    # -------- Çekme akışı --------
+    # -------- Çekme akışı --------
+    
+    def _open_pricempire_for_row(self, row: int):
+        if row < 0:
+            return
+        raw_name = (self.table.item(row, 1).text() if self.table.item(row, 1) else "")
+        quality = (self.table.item(row, 2).text() if self.table.item(row, 2) else "")
         stattrak_hint = None
+        link_hint = None
+        base_name = raw_name
         try:
             raw = self.current_items[row].get("_raw") if row < len(self.current_items) else None
-            if isinstance(raw, dict) and "stattrak" in raw:
-                stattrak_hint = bool(raw.get("stattrak"))
+            if isinstance(raw, dict):
+                if "stattrak" in raw:
+                    stattrak_hint = bool(raw.get("stattrak"))
+                link_hint = raw.get("link")
         except Exception:
             pass
+        if link_hint:
+            pe = pricempire_canonicalize(link_hint) if 'pricempire_canonicalize' in globals() else link_hint
+            if pe:
+                webbrowser.open(pe)
+                return
+        if quality and raw_name.endswith(f" ({quality})"):
+            base_name = raw_name[:-(len(quality)+3)].rstrip()
 
-        url = build_pricempire_url(name, quality, stattrak_hint)
+        url = build_pricempire_url(base_name, quality, stattrak_hint)
         if not url:
             QMessageBox.information(self, "Bilgi", "Bu item için Pricempire linki üretilemedi.")
             return
         webbrowser.open(url)
 
-    # -------- Çekme akışı --------
+    def _on_table_context_menu(self, pos: QPoint):
+        index = self.table.indexAt(pos)
+        row = index.row()
+        if row < 0:
+            return
+        menu = QMenu(self)
+        act_open = QAction("Pricempire linkine git", self)
+        act_copy_skin = QAction("Skin ismini kopyala", self)
+        act_copy_full = QAction("Kopyala", self)
+        menu.addAction(act_open)
+        menu.addSeparator()
+        menu.addAction(act_copy_skin)
+        menu.addAction(act_copy_full)
+        action = menu.exec(self.table.viewport().mapToGlobal(pos))
+        if not action:
+            return
+        if action is act_open:
+            self._open_pricempire_for_row(row)
+            return
+        raw_name = self.table.item(row, 1).text() if self.table.item(row, 1) else ""
+        quality = self.table.item(row, 2).text() if self.table.item(row, 2) else ""
+        base_name = raw_name
+        if quality and raw_name.endswith(f" ({quality})"):
+            base_name = raw_name[:-(len(quality)+3)].rstrip()
+
+        cb = QApplication.clipboard()
+
+        if action == act_copy_skin:
+            cb.setText(base_name)
+        elif action == act_copy_full:
+            cb.setText(f"{base_name} ({quality})" if quality else base_name)
+
     @Slot()
     def fetch_prices(self):
         if not self.current_items:
@@ -763,6 +965,7 @@ class MainWindow(QWidget):
                     "color": it.get("color"),
                     "stattrak": it.get("stattrak"),
                     "type": it.get("type"),
+                    "link": it.get("link") or it.get("url"),
                 }
             })
         return out
