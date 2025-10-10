@@ -24,8 +24,9 @@ from PySide6.QtWidgets import (
     QApplication, QWidget, QHBoxLayout, QVBoxLayout, QSplitter, QTextEdit,
     QPushButton, QTableWidget, QTableWidgetItem, QLabel, QFileDialog,
     QHeaderView, QToolBar, QMessageBox, QLineEdit, QFrame, QAbstractItemView,
-    QSpinBox, QDoubleSpinBox, QFormLayout , QMenu
+    QSpinBox, QDoubleSpinBox, QFormLayout , QMenu, QToolButton   # <-- eklendi
 )
+
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
 
 
@@ -34,6 +35,18 @@ COLUMNS = [
     "Görsel", "İsim", "Kalite", "Site Fiyatı", "Pazar Fiyatı",
     "Sipariş Fiyatı", "Kâr Oranı (%)", "Kâr Miktarı"
 ]
+
+# UI modes
+UI_MODES = {
+    "dark": "Karanlık",
+    "light": "Aydınlık",
+    "grad_dark": "Mor",
+    "grad_light": "Gradyan (Açık)",
+    "asimov": "Asiimov"
+}
+
+
+MAX_ITEMS = 200
 
 PLACEHOLDER_JSON = """{
   "items": [
@@ -77,6 +90,19 @@ WEAR_MAP = {
     "Battle-Scarred": "battle-scarred",
 }
 WEARS = list(WEAR_MAP.keys())
+def _strip_word_souvenir(s: str) -> str:
+    # 'Souvenir ' öneki veya metin içindeki bağımsız 'souvenir' kelimesini sil
+    s = re.sub(r"(?i)^\s*souvenir\s+", "", s)         # baştaki "Souvenir "
+    s = re.sub(r"(?i)\bsouvenir\b", "", s)            # kalan bağımsız kelime
+    return re.sub(r"\s{2,}", " ", s).strip()          # fazla boşlukları temizle
+
+def is_glove_item(name: str, weapon: str = "", skin: str = "") -> bool:
+    txt = f"{name} {weapon} {skin}".lower()
+    # minimum kelimeler: glove, gloves, hand wraps
+    return ("glove" in txt) or ("gloves" in txt) or ("hand wraps" in txt)
+def is_souvenir_item(name: str) -> bool:
+    return "souvenir" in name.lower()
+
 
 def slugify(s: str) -> str:
     s = s.lower()
@@ -161,21 +187,45 @@ def build_pricempire_url(name: str, quality: str = "", stattrak_hint: Optional[b
     weapon, skin, wear, stat = info["weapon"], info["skin"], info["wear"], info["stat"]
     if not wear and quality in WEARS:
         wear = quality
-    if stattrak_hint is True:
-        stat = True
-    # Detect agents first
+
+    # ---- StatTrak yalnızca isimden gelsin ----
+    stat_from_name = bool(re.search(r"\bstattrak\b", name, re.I)) or ("stattrak™" in name.lower()) or ("stattrak\u2122" in name.lower())
+    stat = bool(stat_from_name)
+
+    # ✅ SOUVENIR ÖNCELİK: Souvenir ise her zaman SKIN + souvenir-{wear}; StatTrak kapalı
+    if is_souvenir_item(name):  # veya: if "souvenir" in name.lower():
+        # weapon/skin içinden 'Souvenir' kelimesini tamamen çıkar
+        clean_weapon = _strip_word_souvenir(weapon)
+        clean_skin   = _strip_word_souvenir(skin)
+
+        item_slug = slugify(f"{clean_weapon} {clean_skin}").replace("--", "-")
+        wear_slug = WEAR_MAP.get(wear or "", None)
+        if not item_slug or not wear_slug:
+            return None
+        return f"https://pricempire.com/cs2-items/skin/{item_slug}/souvenir-{wear_slug}"
+
+    # ---- Eldiven kısa yolu (ajan heuristic'inden önce) ----
+    if is_glove_item(name, weapon, skin):
+        item_slug = slugify(f"{weapon} {skin}").replace("--", "-")
+        wear_slug = WEAR_MAP.get(wear or "", None)
+        if not item_slug or not wear_slug:
+            return None
+        return f"https://pricempire.com/cs2-items/glove/{item_slug}/{wear_slug}"
+
+    # ---- Ajan tespiti ----
     if is_probably_agent(weapon, skin):
         agent_slug = build_agent_slug(name)
         return f"https://pricempire.com/cs2-items/agent/{agent_slug}"
 
+    # ---- Normal skin akışı ----
     cat = "glove" if ("glove" in weapon.lower() or "gloves" in weapon.lower()) else "skin"
     item_slug = slugify(f"{weapon} {skin}").replace("--", "-")
     wear_slug = WEAR_MAP.get(wear or "", None)
     if not item_slug or not wear_slug:
         return None
-    wear_part = f"stattrak-{wear_slug}" if stat else wear_slug
-    return f"https://pricempire.com/cs2-items/{cat}/{item_slug}/{wear_part}"
 
+    wear_part = f"stattrak-{wear_slug}" if (stat and cat == "skin") else wear_slug
+    return f"https://pricempire.com/cs2-items/{cat}/{item_slug}/{wear_part}"
 
 
 # ---- Pricempire link canonicalizer (added) ----
@@ -280,6 +330,23 @@ def dark_palette():
     pal.setColor(QPalette.Highlight, QColor(76, 110, 245))
     pal.setColor(QPalette.HighlightedText, Qt.white)
     return pal
+def light_palette():
+    pal = QPalette()
+    pal.setColor(QPalette.Window, QColor("#F5F7FA"))
+    pal.setColor(QPalette.WindowText, QColor("#202124"))
+    pal.setColor(QPalette.Base, QColor("#FFFFFF"))
+    pal.setColor(QPalette.AlternateBase, QColor("#EEF1F5"))
+    pal.setColor(QPalette.ToolTipBase, QColor("#FFFFFF"))
+    pal.setColor(QPalette.ToolTipText, QColor("#202124"))
+    pal.setColor(QPalette.Text, QColor("#202124"))
+    pal.setColor(QPalette.Button, QColor("#FFFFFF"))
+    pal.setColor(QPalette.ButtonText, QColor("#202124"))
+    pal.setColor(QPalette.BrightText, Qt.red)
+    pal.setColor(QPalette.Highlight, QColor("#1769E0"))
+    pal.setColor(QPalette.HighlightedText, Qt.white)
+    return pal
+
+ASIIMOV_ACCENT = "#df7116"
 
 
 # -------------------- HTTP yardımcıları --------------------
@@ -712,6 +779,363 @@ class PriceFetchWorker(QObject):
 
 # -------------------- Ana pencere --------------------
 class MainWindow(QWidget):
+
+    # --- Tema yardımcıları: SINIF METODLARI (init DIŞINDA!) ---
+    def _palette_for_mode(self, mode: str) -> QPalette:
+        # Her mod için mutlaka QPalette döndür!
+        if mode == "light":
+            return light_palette()
+        elif mode == "grad_light":
+            return light_palette()
+        elif mode == "asimov":
+            pal = QPalette()
+            pal.setColor(QPalette.Window, QColor("#eeeeee"))
+            pal.setColor(QPalette.Base, QColor("#ffffff"))
+            pal.setColor(QPalette.AlternateBase, QColor("#f6f6f6"))
+            pal.setColor(QPalette.WindowText, QColor("#000000"))
+            pal.setColor(QPalette.Text, QColor("#000000"))
+            pal.setColor(QPalette.ButtonText, QColor("#000000"))
+            pal.setColor(QPalette.ToolTipBase, QColor("#ffffff"))
+            pal.setColor(QPalette.ToolTipText, QColor("#000000"))
+            pal.setColor(QPalette.Button, QColor("#ffffff"))
+            pal.setColor(QPalette.Highlight, QColor(ASIIMOV_ACCENT))
+            pal.setColor(QPalette.HighlightedText, Qt.white)
+            pal.setColor(QPalette.Link, QColor(ASIIMOV_ACCENT))
+            pal.setColor(QPalette.BrightText, QColor(ASIIMOV_ACCENT))
+            return pal
+        elif mode == "grad_dark":
+            pal = QPalette()
+            pal.setColor(QPalette.Window, QColor("#0b0b10"))
+            pal.setColor(QPalette.Base, QColor("#12121a"))
+            pal.setColor(QPalette.AlternateBase, QColor("#191926"))
+            pal.setColor(QPalette.WindowText, QColor("#E6E6E9"))
+            pal.setColor(QPalette.Text, QColor("#E6E6E9"))
+            pal.setColor(QPalette.Button, QColor("#1b1b28"))
+            pal.setColor(QPalette.ButtonText, QColor("#E6E6E9"))
+            pal.setColor(QPalette.ToolTipBase, QColor("#1f1f2d"))
+            pal.setColor(QPalette.ToolTipText, QColor("#E6E6E9"))
+            pal.setColor(QPalette.Highlight, QColor("#8b5cf6"))
+            pal.setColor(QPalette.HighlightedText, Qt.white)
+            pal.setColor(QPalette.Link, QColor("#a855f7"))
+            pal.setColor(QPalette.BrightText, QColor("#a855f7"))
+            return pal
+        elif mode == "dark":
+            # <-- BUNU EKLE: dark açıkça dönsün
+            return dark_palette()
+
+        # Güvenli varsayılan: hiçbiri eşleşmezse dark
+        return dark_palette()
+
+
+    def set_ui_mode(self, mode: str):
+        self.ui_mode = mode
+        app = QApplication.instance()
+
+        # Palet ve stylesheet'i güvenle al
+        pal = self._palette_for_mode(mode)
+        if pal is None:                     # Savunmacı programlama
+            pal = dark_palette()
+
+        css = self._stylesheet_for_mode(mode)
+        if not isinstance(css, str):        # Boş/None gelirse en azından boş string
+            css = ""
+
+        app.setStyle("Fusion")
+        app.setPalette(pal)
+        app.setStyleSheet(css)
+
+
+    def _stylesheet_for_mode(self, mode: str) -> str:
+        if mode == "grad_dark":
+            return """
+            /* Arka plan: siyah → mor gradyan */
+            QWidget {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                            stop:0 #0b0b10, stop:0.55 #141425, stop:1 #2a0a3a);
+                color: #E6E6E9;
+                font-family: 'Segoe UI', sans-serif;
+                font-size: 11pt;
+            }
+
+            /* Toolbar: yarı saydam koyu + mor alt çizgi */
+            QToolBar {
+                background: rgba(20,20,37,0.85);
+                border: none;
+                border-bottom: 2px solid #8b5cf6;
+                padding: 6px;
+            }
+
+            /* Butonlar: koyu zemin + mor vurgu */
+            QPushButton {
+                background: #1b1b28;
+                color: #EDEDF2;
+                border: 1px solid #8b5cf6;
+                border-radius: 8px;
+                padding: 6px 12px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background: #26263a;
+                border-color: #a78bfa;
+            }
+            QPushButton:pressed {
+                background: #1a1630;
+                border-color: #7c3aed;
+            }
+            QPushButton:disabled {
+                color: #9a9aaa;
+                border-color: #3a3a4a;
+                background: #151520;
+            }
+
+            /* Giriş alanları */
+            QLineEdit, QSpinBox, QDoubleSpinBox, QTextEdit {
+                background: #12121a;
+                color: #E6E6E9;
+                border: 1px solid #3e3e5a;
+                border-radius: 6px;
+                padding: 4px 8px;
+                selection-background-color: #8b5cf6;
+                selection-color: white;
+            }
+            QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QTextEdit:focus {
+                border: 1px solid #8b5cf6;
+                box-shadow: 0 0 0 2px rgba(139,92,246,0.25);
+            }
+
+            /* Tablo başlıkları: mor şerit */
+            QHeaderView::section {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                            stop:0 #5221b5, stop:1 #8b5cf6);
+                color: white;
+                border: none;
+                border-bottom: 1px solid #3a2a5a;
+                padding: 6px 8px;
+                font-weight: 600;
+            }
+
+            /* Tablo gövdesi */
+            QTableWidget {
+                background: #12121a;
+                alternate-background-color: #191926;
+                gridline-color: #2a2a3f;
+                selection-background-color: #8b5cf6;
+                selection-color: white;
+                outline: none;
+            }
+            QTableWidget::item {
+                padding: 4px 6px;
+                border-bottom: 1px solid #1f1f2f;
+            }
+            QTableWidget::item:hover {
+                background: #1a1630;
+            }
+            QTableWidget::item:selected {
+                background: #8b5cf6;
+                color: white;
+                font-weight: 600;
+            }
+            QTableCornerButton::section {
+                background: #2a0a3a;
+                border: none;
+            }
+
+            /* Splitter: ince mor çizgi */
+            QSplitter::handle {
+                background: #3d2a5f;
+                width: 3px;
+            }
+
+            /* ToolTip */
+            QToolTip {
+                background: #1f1f2d;
+                color: #E6E6E9;
+                border: 1px solid #8b5cf6;
+                padding: 4px 6px;
+                border-radius: 6px;
+            }
+
+            /* Tema butonu ve menü */
+            QToolButton {
+                background: #1b1b28;
+                color: #EDEDF2;
+                border: 1px solid #8b5cf6;
+                border-radius: 8px;
+                padding: 6px 10px;
+                font-weight: 600;
+            }
+            QToolButton:hover {
+                background: #26263a;
+                border-color: #a78bfa;
+            }
+            QMenu {
+                background: #151523;
+                color: #EDEDF2;
+                border: 1px solid #8b5cf6;
+            }
+            QMenu::item:selected {
+                background: #8b5cf6;
+                color: white;
+            }
+            """
+
+        if mode == "grad_light":
+            return """
+            QWidget {
+                background: qlineargradient(x1:0,y1:0, x2:0,y2:1,
+                            stop:0 #f5f7fa, stop:1 #eaeef2);
+                color: #202124;
+            }
+            QToolBar { background: #c5c5c5; border-bottom: 1px solid #d0d7de; }
+            QTableWidget::item:selected { background: #1769E0; color: white; }
+            """
+        if mode == "asimov":
+            return f"""
+            /* GENEL */
+            QWidget {{
+                background: #c5c5c5;
+                color: #000000;
+                font-family: 'Segoe UI', sans-serif;
+                font-size: 11pt;
+            }}
+
+            /* TOOLBAR */
+            QToolBar {{
+                background: #c5c5c5;
+                border-bottom: 3px solid {ASIIMOV_ACCENT};
+                padding: 6px;
+            }}
+
+            /* BUTONLAR */
+            QPushButton {{
+                background: {ASIIMOV_ACCENT};
+                color: #c5c5c5;
+                border: 2px solid #000000;
+                border-radius: 8px;
+                padding: 6px 12px;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                background: #ff8520;
+                color: #c5c5c5;
+                border-color: #000000;
+            }}
+            QPushButton:pressed {{
+                background: #c55f12;
+                color: #c5c5c5;
+            }}
+            QPushButton:disabled {{
+                background: #cccccc;
+                color: #666666;
+                border: 1px solid #999999;
+            }}
+
+            /* METİN ALANLARI */
+            QLineEdit, QSpinBox, QDoubleSpinBox, QTextEdit {{
+                background: #c5c5c5;
+                color: #000000;
+                border: 2px solid {ASIIMOV_ACCENT};
+                border-radius: 5px;
+                padding: 4px 6px;
+                selection-background-color: {ASIIMOV_ACCENT};
+                selection-color: #c5c5c5;
+            }}
+            QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QTextEdit:focus {{
+                border: 2px solid #000000;
+            }}
+
+            /* TABLO BAŞLIKLARI */
+            QHeaderView::section {{
+                background: {ASIIMOV_ACCENT};
+                color: #ffffff;
+                font-weight: bold;
+                border: 1px solid #c5c5c5;
+                padding: 6px;
+            }}
+
+            /* TABLO GENEL */
+            QTableWidget {{
+                gridline-color: #fe6903;
+                selection-background-color: {ASIIMOV_ACCENT};
+                selection-color: #ffffff;
+                alternate-background-color: #f5f5f5;
+            }}
+
+            /* TABLO HÜCRELERİ */
+            QTableWidget::item {{
+                border-bottom: 1px solid #cccccc;
+                padding: 4px;
+            }}
+            QTableWidget::item:selected {{
+                background: {ASIIMOV_ACCENT};
+                color: #ffffff;
+                font-weight: 600;
+            }}
+            QTableCornerButton::section {{
+                background: {ASIIMOV_ACCENT};
+                border: none;
+            }}
+
+            /* SPLITTER */
+            QSplitter::handle {{
+                background: {ASIIMOV_ACCENT};
+                width: 3px;
+            }}
+
+            /* TOOLTIP */
+            QToolTip {{
+                background: #ffffff;
+                color: #000000;
+                border: 2px solid {ASIIMOV_ACCENT};
+                padding: 4px;
+                border-radius: 6px;
+            }}
+
+            /* THEME MENU BUTTON */
+            QToolButton {{
+                background: #ffffff;
+                color: #000000;
+                border: 2px solid {ASIIMOV_ACCENT};
+                border-radius: 6px;
+                padding: 6px 10px;
+                font-weight: 600;
+            }}
+            QToolButton:hover {{
+                background: {ASIIMOV_ACCENT};
+                color: #ffffff;
+            }}
+
+            /* MENU */
+            QMenu {{
+                background: #ffffff;
+                color: #000000;
+                border: 2px solid {ASIIMOV_ACCENT};
+            }}
+            QMenu::item:selected {{
+                background: {ASIIMOV_ACCENT};
+                color: #ffffff;
+            }}
+            """
+
+
+        if mode == "light":
+            return """
+            QToolBar { background: #ffffff; border-bottom: 1px solid #d0d7de; }
+            QTableWidget::item:selected { background: #1769E0; color: white; }
+            """
+        # dark
+        return """
+        QToolBar { background: #1b1d20; border: none; }
+        QTableWidget::item:selected { background: #4c6ef5; color: white; }
+        """
+
+    def set_ui_mode(self, mode: str):
+        self.ui_mode = mode
+        app = QApplication.instance()
+        app.setStyle("Fusion")
+        app.setPalette(self._palette_for_mode(mode))
+        app.setStyleSheet(self._stylesheet_for_mode(mode))
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("SkinMarket-Analyzer")
@@ -729,6 +1153,25 @@ class MainWindow(QWidget):
         act_save.triggered.connect(self.save_json_file)
         self.toolbar.addAction(act_open)
         self.toolbar.addAction(act_save)
+
+        # --- Tema butonu (açılır menü) ---
+        self.btn_theme = QToolButton(self)
+        self.btn_theme.setText("Tema")
+        self.btn_theme.setPopupMode(QToolButton.InstantPopup)
+        menu = QMenu(self)
+
+        def _add_mode(label, key):
+            act = QAction(label, self)
+            act.triggered.connect(lambda _=False, k=key: self.set_ui_mode(k))
+            menu.addAction(act)
+
+        _add_mode(UI_MODES["dark"], "dark")
+        _add_mode(UI_MODES["light"], "light")
+        _add_mode(UI_MODES["grad_dark"], "grad_dark")
+        _add_mode(UI_MODES["asimov"], "asimov")
+
+        self.btn_theme.setMenu(menu)
+        self.toolbar.addWidget(self.btn_theme)
 
         # Sol panel
         self.json_edit = QTextEdit()
@@ -819,8 +1262,6 @@ class MainWindow(QWidget):
         self._open_pricempire_for_row(row)
 
     # -------- Çekme akışı --------
-    # -------- Çekme akışı --------
-    
     def _open_pricempire_for_row(self, row: int):
         if row < 0:
             return
@@ -829,6 +1270,14 @@ class MainWindow(QWidget):
         stattrak_hint = None
         link_hint = None
         base_name = raw_name
+
+        # Sticker engeli
+        if "sticker" in raw_name.lower():
+            QMessageBox.information(
+                self, "Bilgi", "Sticker öğeleri için Pricempire linki oluşturulmaz."
+            )
+            return
+
         try:
             raw = self.current_items[row].get("_raw") if row < len(self.current_items) else None
             if isinstance(raw, dict):
@@ -837,11 +1286,13 @@ class MainWindow(QWidget):
                 link_hint = raw.get("link")
         except Exception:
             pass
+
         if link_hint:
             pe = pricempire_canonicalize(link_hint) if 'pricempire_canonicalize' in globals() else link_hint
             if pe:
                 webbrowser.open(pe)
                 return
+
         if quality and raw_name.endswith(f" ({quality})"):
             base_name = raw_name[:-(len(quality)+3)].rstrip()
 
@@ -877,7 +1328,6 @@ class MainWindow(QWidget):
             base_name = raw_name[:-(len(quality)+3)].rstrip()
 
         cb = QApplication.clipboard()
-
         if action == act_copy_skin:
             cb.setText(base_name)
         elif action == act_copy_full:
@@ -985,9 +1435,9 @@ class MainWindow(QWidget):
             else:
                 raise ValueError("Beklenen format: liste veya {'items': [...]}")
 
-            if len(items_raw) > 150:
-                QMessageBox.information(self, "Bilgi", f"{len(items_raw)} adet geldi. İlk 150 tanesi yüklenecek.")
-                items_raw = items_raw[:150]
+            if len(items_raw) > MAX_ITEMS:
+                QMessageBox.information(self, "Bilgi", f"{len(items_raw)} adet geldi. İlk {MAX_ITEMS} tanesi yüklenecek.")
+                items_raw = items_raw[:MAX_ITEMS]
 
             items = self._normalize_items(items_raw)
         except Exception as e:
@@ -1054,11 +1504,12 @@ class MainWindow(QWidget):
 
 def main():
     app = QApplication(sys.argv)
-    app.setStyle("Fusion")
-    app.setPalette(dark_palette())
+    app.setStyle("Fusion")  # isteğe bağlı; set_ui_mode zaten paleti basıyor
     w = MainWindow()
+    w.set_ui_mode("dark")   # <-- başlangıç modu
     w.show()
     sys.exit(app.exec())
+
 
 
 if __name__ == "__main__":
